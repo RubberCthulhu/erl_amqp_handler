@@ -1,0 +1,22 @@
+{application, amqp_handler,
+ [
+  {description, "AMQP message handler"},
+  {vsn, "1.0"},
+  {modules, [
+		amqp_handler_app,
+		amqp_handler_sup,
+		amqp_handler,
+		amqp_handler_manager,
+		amqp_handler_listener_sup,
+		amqp_handler_listener,
+		amqp_handler_worker_sup,
+		amqp_handler_worker
+  ]},
+  {registered, [amqp_handler_sup]},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { amqp_handler_app, []}},
+  {env, []}
+ ]}.
