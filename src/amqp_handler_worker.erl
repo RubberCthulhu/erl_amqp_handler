@@ -138,22 +138,23 @@ handle_info(work, State) ->
 
     amqp_channel:cast(Chan, #'basic.ack'{delivery_tag = DeliveryTag}),
 
-    Reason = case CbModule:handle(Exchange, RoutingKey, Msg, CbState) of
-		 {reply, Reply, _CbState1} ->
-		     case amqp_reply(Chan, Exchange, ReplyTo, CorrelationId, Reply) of
+    case CbModule:handle(Exchange, RoutingKey, Msg, CbState) of
+	{reply, Reply, CbState1} ->
+	    Reason = case amqp_reply(Chan, Exchange, ReplyTo, CorrelationId, Reply) of
 			 ok ->
 			     normal;
 			 Error ->
 			     Error
-		     end;
-		 {noreply, _CbState1} ->
-		     normal;
-		 {stop, Reason1} ->
-		     Reason1;
-		 {error, _} = Error ->
-		     Error
-	     end,
-    {stop, Reason, State};
+		     end,
+	    {stop, Reason, State#state{cb_state = CbState1}};
+	{noreply, CbState1} ->
+	    {stop, normal, State#state{cb_state = CbState1}};
+	{stop, Reason, CbState1} ->
+	    {stop, Reason, State#state{cb_state = CbState1}};
+	{error, _} = Error ->
+	    {stop, Error, State}
+    end;
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
