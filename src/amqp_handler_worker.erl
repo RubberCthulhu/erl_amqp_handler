@@ -129,18 +129,16 @@ handle_info(work, State) ->
        delivery_tag = DeliveryTag
       } = Deliver,
     #amqp_msg{
-       props = Props,
-       payload = Payload
+       props = Props
       } = Msg,
     #'P_basic'{
-       content_type = ContentType,
        reply_to = ReplyTo,
        correlation_id = CorrelationId
       } = Props,
 
     amqp_channel:cast(Chan, #'basic.ack'{delivery_tag = DeliveryTag}),
 
-    Reason = case CbModule:handle(Exchange, RoutingKey, ContentType, Payload, CbState) of
+    Reason = case CbModule:handle(Exchange, RoutingKey, Msg, CbState) of
 		 {reply, Reply, _CbState1} ->
 		     case amqp_reply(Chan, Exchange, ReplyTo, CorrelationId, Reply) of
 			 ok ->
