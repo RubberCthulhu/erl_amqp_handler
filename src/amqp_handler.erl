@@ -5,7 +5,7 @@
 
 %% API
 -export([start/0, start/1, stop/0]).
--export([start_handler/7, stop_pool/1]).
+-export([start_handler/7, stop_handler/1]).
 -export([start_link/6, start_worker_sup/3, start_listener_sup/6]).
 
 %% Callback
@@ -30,7 +30,7 @@ start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs) -
 	    permanent, 2000, supervisor, [amqp_handler]},
     supervisor:start_child(amqp_handler_sup, Spec).
 
-stop_pool(Id) ->
+stop_handler(Id) ->
     supervisor:terminate_child(amqp_handler_sup, Id),
     supervisor:delete_child(amqp_handler_sup, Id).
 
