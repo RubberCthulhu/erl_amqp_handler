@@ -26,7 +26,7 @@
 	  conn_monitor,
 	  exchange_declare,
 	  routing_key,
-	  listeners_number,
+	  consumers_number,
 	  cb_module,
 	  cb_args
 }).
@@ -42,8 +42,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs) ->
-    gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs], []).
+start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+    gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -60,7 +60,7 @@ start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs) 
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]) ->
+init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]) ->
     {ok, Conn} = amqp_connection:start(ConnAttrs),
     ConnMonitor = monitor(process, Conn),
 
@@ -71,7 +71,7 @@ init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]) ->
 	       conn_monitor = ConnMonitor,
 	       exchange_declare = ExchangeDeclare,
 	       routing_key = RoutingKey,
-	       listeners_number = N,
+	       consumers_number = NumberOfConsumers,
 	       cb_module = CbModule,
 	       cb_args = CbArgs
 	      },
@@ -129,15 +129,15 @@ handle_info(start, State) ->
        conn = Conn,
        exchange_declare = ExchangeDeclare,
        routing_key = RoutingKey,
-       listeners_number = N
+       consumers_number = NumberOfConsumers
       } = State,
+
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
-    {ok, ListenerSup} = amqp_handler:start_listener_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, N, WorkerSup),
-
+    {ok, ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
     link(WorkerSup),
-    link(ListenerSup),
+    link(ConsumerSup),
 
-    ok;
+    {noreply, State};
 
 handle_info({'DOWN', ConnMonitor, process, Conn, _Info},
 	    #state{conn_monitor = ConnMonitor, conn = Conn} = State) ->

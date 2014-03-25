@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 21 Mar 2014 by Danil Onishchenko
 %%%-------------------------------------------------------------------
--module(amqp_handler_listener_sup).
+-module(amqp_handler_consumer_sup).
 
 -behaviour(supervisor).
 
@@ -27,8 +27,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Conn, ExchangeDeclare, RoutingKey, N, WorkerSup) ->
-    supervisor:start_link(?MODULE, [Conn, ExchangeDeclare, RoutingKey, N, WorkerSup]).
+start_link(Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
+    supervisor:start_link(?MODULE, [Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -47,9 +47,9 @@ start_link(Conn, ExchangeDeclare, RoutingKey, N, WorkerSup) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Conn, ExchangeDeclare, RoutingKey, N, WorkerSup]) ->
+init([Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]) ->
     RestartStrategy = one_for_one,
-    MaxRestarts = 1000,
+    MaxRestarts = 10,
     MaxSecondsBetweenRestarts = 3600,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
@@ -58,13 +58,16 @@ init([Conn, ExchangeDeclare, RoutingKey, N, WorkerSup]) ->
     Shutdown = 2000,
     Type = worker,
 
-    Listeners = [{{amqp_handler_listener, make_ref()},
-		  {amqp_handler_listener, start_link, [Conn, ExchangeDeclare, RoutingKey, WorkerSup]},
-		  Restart, Shutdown, Type, [amqp_handler_listener]}
-		 || _ <- lists:seq(1, N)],
+    Consumers = [{{amqp_handler_consumer, make_ref()},
+		  {amqp_handler_consumer, start_link, [Conn, ExchangeDeclare, RoutingKey, WorkerSup]},
+		  Restart, Shutdown, Type, [amqp_handler_consumer]}
+		 || _ <- lists:seq(1, NumberOfConsumers)],
 
-    {ok, {SupFlags, Listeners}}.
+    {ok, {SupFlags, Consumers}}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+
+

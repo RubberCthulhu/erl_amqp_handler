@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 21 Mar 2014 by Danil Onishchenko
 %%%-------------------------------------------------------------------
--module(amqp_handler_listener).
+-module(amqp_handler_consumer).
 
 -behaviour(gen_server).
 

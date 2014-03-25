@@ -6,7 +6,7 @@
 %% API
 -export([start/0, start/1, stop/0]).
 -export([start_handler/7, stop_handler/1]).
--export([start_link/6, start_worker_sup/3, start_listener_sup/6]).
+-export([start_link/6, start_worker_sup/3, start_consumer_sup/6]).
 
 %% Callback
 -export([init/1]).
@@ -24,9 +24,9 @@ start(Type) ->
 stop() ->
     application:stop(amqp_handler).
 
-start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs) ->
+start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
     Spec = {Id,
-	    {amqp_handler, start_link, [ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]},
+	    {amqp_handler, start_link, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
 	    permanent, 2000, supervisor, [amqp_handler]},
     supervisor:start_child(amqp_handler_sup, Spec).
 
@@ -41,8 +41,8 @@ stop_handler(Id) ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs) ->
-    supervisor:start_link(?MODULE, [ConnAttrs, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]).
+start_link(ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+    supervisor:start_link(?MODULE, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]).
 
 start_worker_sup(Pid, CbModule, CbArgs) ->
     Spec = {amqp_handler_worker_sup, {amqp_handler_worker_sup, start_link, [CbModule, CbArgs]},
@@ -55,14 +55,14 @@ start_worker_sup(Pid, CbModule, CbArgs) ->
 	    supervisor:start_child(Pid, Spec)
     end.
 
-start_listener_sup(Pid, Conn, ExchangeDeclare, RoutingKey, N, WorkerSup) ->
-    Spec = {amqp_handler_listener_sup,
-	    {amqp_handler_listener_sup, start_link, [Conn, ExchangeDeclare, RoutingKey, N, WorkerSup]},
-	    permanent, 2000, supervisor, [amqp_handler_listener_sup]},
+start_consumer_sup(Pid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
+    Spec = {amqp_handler_consumer_sup,
+	    {amqp_handler_consumer_sup, start_link, [Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]},
+	    permanent, 2000, supervisor, [amqp_handler_consumer_sup]},
     Children = [Id || {Id, _, _, _} <- supervisor:which_children(Pid)],
-    case lists:member(amqp_handler_listener_sup, Children) of
+    case lists:member(amqp_handler_consumer_sup, Children) of
 	true ->
-	    {error, listener_sup_already_started};
+	    {error, consumer_sup_already_started};
 	false ->
 	    supervisor:start_child(Pid, Spec)
     end.
@@ -84,9 +84,9 @@ start_listener_sup(Pid, Conn, ExchangeDeclare, RoutingKey, N, WorkerSup) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([ConnParams, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]) ->
-    RestartStrategy = one_for_one_all,
-    MaxRestarts = 1000,
+init([ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]) ->
+    RestartStrategy = one_for_all,
+    MaxRestarts = 10,
     MaxSecondsBetweenRestarts = 3600,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
@@ -96,7 +96,7 @@ init([ConnParams, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]) ->
     Type = worker,
 
     Manager = {amqp_handler_manager,
-	       {amqp_handler_manager, start_link, [self(), ConnParams, ExchangeDeclare, RoutingKey, N, CbModule, CbArgs]},
+	       {amqp_handler_manager, start_link, [self(), ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
 	       Restart, Shutdown, Type, [amqp_handler_manager]},
 
     {ok, {SupFlags, [Manager]}}.

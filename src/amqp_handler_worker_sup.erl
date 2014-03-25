@@ -54,7 +54,7 @@ start_child(Pid, Chan, Deliver, Msg) ->
 %%--------------------------------------------------------------------
 init([CbModule, Args]) ->
     RestartStrategy = simple_one_for_one,
-    MaxRestarts = 1000,
+    MaxRestarts = 10,
     MaxSecondsBetweenRestarts = 3600,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
