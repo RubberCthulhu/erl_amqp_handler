@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/7]).
+-export([start_link/7, wait_for_ready/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -28,7 +28,9 @@
 	  routing_key,
 	  consumers_number,
 	  cb_module,
-	  cb_args
+	  cb_args,
+	  state = start :: start | work,
+	  waiters = []
 }).
 
 %%%===================================================================
@@ -44,6 +46,9 @@
 %%--------------------------------------------------------------------
 start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
     gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs], []).
+
+wait_for_ready(Pid, Timeout) ->
+    gen_server:call(Pid, wait_for_ready, Timeout).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -73,7 +78,8 @@ init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModul
 	       routing_key = RoutingKey,
 	       consumers_number = NumberOfConsumers,
 	       cb_module = CbModule,
-	       cb_args = CbArgs
+	       cb_args = CbArgs,
+	       state = start
 	      },
 
     self() ! start,
@@ -94,6 +100,12 @@ init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModul
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call(wait_for_ready, From, #state{state = start, waiters = Waiters} = State) ->
+    {noreply, State#state{waiters = [From | Waiters]}};
+
+handle_call(wait_for_ready, _From, #state{state = work} = State) ->
+    {reply, ready, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -121,7 +133,7 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(start, State) ->
+handle_info(start, #state{waiters = Waiters} = State) ->
     #state{
        sup = SupPid,
        cb_module = CbModule,
@@ -134,10 +146,13 @@ handle_info(start, State) ->
 
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
     {ok, ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
+
     link(WorkerSup),
     link(ConsumerSup),
 
-    {noreply, State};
+    lists:foreach(fun (From) -> gen_server:reply(From, ready) end, Waiters),
+
+    {noreply, State#state{state = work, waiters = []}};
 
 handle_info({'DOWN', ConnMonitor, process, Conn, _Info},
 	    #state{conn_monitor = ConnMonitor, conn = Conn} = State) ->

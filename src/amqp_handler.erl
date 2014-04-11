@@ -6,7 +6,7 @@
 %% API
 -export([start/0, start/1, stop/0]).
 -export([start_handler/7, stop_handler/1]).
--export([start_link/6, start_worker_sup/3, start_consumer_sup/6]).
+-export([start_link/0, start_worker_sup/3, start_consumer_sup/6]).
 
 %% Callback
 -export([init/1]).
@@ -24,11 +24,26 @@ start(Type) ->
 stop() ->
     application:stop(amqp_handler).
 
+%%start_handler1(Id, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+%%    Spec = {Id,
+%%	    {amqp_handler, start_link, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
+%%	    permanent, 2000, supervisor, [amqp_handler]},
+%%    supervisor:start_child(amqp_handler_sup, Spec).
+
 start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
-    Spec = {Id,
-	    {amqp_handler, start_link, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
+    Spec = {Id, {amqp_handler, start_link, []},
 	    permanent, 2000, supervisor, [amqp_handler]},
-    supervisor:start_child(amqp_handler_sup, Spec).
+    case supervisor:start_child(amqp_handler_sup, Spec) of
+	{ok, SupPid} ->
+	    case start_handler_manager(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) of
+		{ok, _Manager} ->
+		    {ok, SupPid};
+		Error ->
+		    Error
+	    end;
+	Error ->
+	    Error
+    end.
 
 stop_handler(Id) ->
     supervisor:terminate_child(amqp_handler_sup, Id),
@@ -41,8 +56,10 @@ stop_handler(Id) ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
-    supervisor:start_link(?MODULE, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]).
+%%start_link(ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+%%    supervisor:start_link(?MODULE, [ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]).
+start_link() ->
+    supervisor:start_link(?MODULE, []).
 
 start_worker_sup(Pid, CbModule, CbArgs) ->
     Spec = {amqp_handler_worker_sup, {amqp_handler_worker_sup, start_link, [CbModule, CbArgs]},
@@ -84,26 +101,40 @@ start_consumer_sup(Pid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, Wo
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]) ->
+%%init([ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]) ->
+init([]) ->
     RestartStrategy = one_for_all,
     MaxRestarts = 10,
     MaxSecondsBetweenRestarts = 3600,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    Restart = permanent,
-    Shutdown = 2000,
-    Type = worker,
-
-    Manager = {amqp_handler_manager,
-	       {amqp_handler_manager, start_link, [self(), ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
-	       Restart, Shutdown, Type, [amqp_handler_manager]},
-
-    {ok, {SupFlags, [Manager]}}.
+%%    Restart = permanent,
+%%    Shutdown = 2000,
+%%    Type = worker,
+%%
+%%    Manager = {amqp_handler_manager,
+%%	       {amqp_handler_manager, start_link, [self(), ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
+%%	       Restart, Shutdown, Type, [amqp_handler_manager]},
+%%
+%%    {ok, {SupFlags, [Manager]}}.
+    {ok, {SupFlags, []}}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+start_handler_manager(SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+    Spec = {amqp_handler_manager,
+	    {amqp_handler_manager, start_link, [SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
+	    permanent, 2000, worker, [amqp_handler_manager]},
+    case supervisor:start_child(SupPid, Spec) of
+	{ok, Pid} ->
+	    ready = amqp_handler_manager:wait_for_ready(Pid, 3000),
+	    {ok, Pid};
+	Error ->
+	    Error
+    end.
 
 
 
