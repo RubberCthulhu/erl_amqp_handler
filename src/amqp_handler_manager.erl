@@ -147,8 +147,8 @@ handle_info(start, #state{waiters = Waiters} = State) ->
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
     {ok, ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
 
-    link(WorkerSup),
-    link(ConsumerSup),
+    %%link(WorkerSup),
+    %%link(ConsumerSup),
 
     lists:foreach(fun (From) -> gen_server:reply(From, ready) end, Waiters),
 
