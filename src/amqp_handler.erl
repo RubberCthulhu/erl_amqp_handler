@@ -5,7 +5,7 @@
 
 %% API
 -export([start/0, start/1, stop/0]).
--export([start_handler/7, stop_handler/1]).
+-export([start_handler/8, stop_handler/1]).
 -export([start_link/0, start_worker_sup/3, start_consumer_sup/6,
 	 stop_worker_sup/1, stop_consumer_sup/1]).
 
@@ -31,12 +31,12 @@ stop() ->
 %%	    permanent, 2000, supervisor, [amqp_handler]},
 %%    supervisor:start_child(amqp_handler_sup, Spec).
 
-start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+start_handler(Id, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts) ->
     Spec = {Id, {amqp_handler, start_link, []},
 	    permanent, 2000, supervisor, [amqp_handler]},
     case supervisor:start_child(amqp_handler_sup, Spec) of
 	{ok, SupPid} ->
-	    case start_handler_manager(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) of
+	    case start_handler_manager(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts) of
 		{ok, _Manager} ->
 		    {ok, SupPid};
 		Error ->
@@ -133,9 +133,9 @@ init([]) ->
 %%% Internal functions
 %%%===================================================================
 
-start_handler_manager(SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
+start_handler_manager(SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts) ->
     Spec = {amqp_handler_manager,
-	    {amqp_handler_manager, start_link, [SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]},
+	    {amqp_handler_manager, start_link, [SupPid, ConnParams, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts]},
 	    permanent, 2000, worker, [amqp_handler_manager]},
     case supervisor:start_child(SupPid, Spec) of
 	{ok, Pid} ->
