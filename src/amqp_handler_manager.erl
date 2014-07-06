@@ -159,7 +159,7 @@ handle_info(init, #state{state = init} = State) ->
 	    self() ! start,
 	    {noreply, State1};
 
-	_Error when KeepAlive, ConnectLimit == infinity orelse ConnectNumber < ConnectLimit ->
+	_Error when KeepAlive, ConnectLimit == infinity orelse (ConnectNumber + 1) < ConnectLimit ->
 	    State1 = State#state{
 		       connect_number = ConnectNumber + 1
 		      },
