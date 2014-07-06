@@ -6,7 +6,8 @@
 %% API
 -export([start/0, start/1, stop/0]).
 -export([start_handler/7, stop_handler/1]).
--export([start_link/0, start_worker_sup/3, start_consumer_sup/6]).
+-export([start_link/0, start_worker_sup/3, start_consumer_sup/6,
+	 stop_worker_sup/1, stop_consumer_sup/1]).
 
 %% Callback
 -export([init/1]).
@@ -83,6 +84,14 @@ start_consumer_sup(Pid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, Wo
 	false ->
 	    supervisor:start_child(Pid, Spec)
     end.
+
+stop_worker_sup(Pid) ->
+    supervisor:terminate_child(Pid, amqp_handler_worker_sup),
+    supervisor:delete_child(Pid, amqp_handler_worker_sup).
+
+stop_consumer_sup(Pid) ->
+    supervisor:terminate_child(Pid, amqp_handler_consumer_sup),
+    supervisor:delete_child(Pid, amqp_handler_consumer_sup).
 
 %%%===================================================================
 %%% Supervisor callbacks

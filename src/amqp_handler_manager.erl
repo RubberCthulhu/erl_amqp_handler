@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/7, wait_for_ready/2]).
+-export([start_link/7, start_link/8, wait_for_ready/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -20,17 +20,21 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-	  sup,
+	  sup :: pid(),
 	  conn_attrs,
-	  conn,
-	  conn_monitor,
+	  conn = undefined :: pid(),
+	  conn_monitor = undefined :: reference(),
 	  exchange_declare,
-	  routing_key,
-	  consumers_number,
+	  routing_key :: binary(),
+	  consumers_number :: non_neg_integer(),
 	  cb_module,
 	  cb_args,
-	  state = start :: start | work,
-	  waiters = []
+	  state = init :: init | start | work,
+	  waiters = [] :: [pid()],
+	  keepalive = false :: boolean(),
+	  connect_timeout = 5000 :: non_neg_integer(),
+	  connect_limit = infinity :: infinity | non_neg_integer(),
+	  connect_number = 0 :: non_neg_integer()
 }).
 
 %%%===================================================================
@@ -45,7 +49,10 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs) ->
-    gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs], []).
+    gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, []], []).
+
+start_link(SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts) ->
+    gen_server:start_link(?MODULE, [SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts], []).
 
 wait_for_ready(Pid, Timeout) ->
     gen_server:call(Pid, wait_for_ready, Timeout).
@@ -65,24 +72,22 @@ wait_for_ready(Pid, Timeout) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs]) ->
-    {ok, Conn} = amqp_connection:start(ConnAttrs),
-    ConnMonitor = monitor(process, Conn),
-
+init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts]) ->
     State = #state{
 	       sup = SupPid,
 	       conn_attrs = ConnAttrs,
-	       conn = Conn,
-	       conn_monitor = ConnMonitor,
 	       exchange_declare = ExchangeDeclare,
 	       routing_key = RoutingKey,
 	       consumers_number = NumberOfConsumers,
 	       cb_module = CbModule,
 	       cb_args = CbArgs,
-	       state = start
+	       state = init,
+	       keepalive = proplists:get_bool(keepalive, Opts),
+	       connect_timeout = proplists:get_value(connect_timeout, Opts, 5000),
+	       connect_limit = proplists:get_value(connect_limit, Opts, infinity)
 	      },
 
-    self() ! start,
+    self() ! init,
 
     {ok, State}.
 
@@ -133,7 +138,39 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(start, #state{waiters = Waiters} = State) ->
+handle_info(init, #state{state = init} = State) ->
+    #state{
+       conn_attrs = ConnAttrs,
+       keepalive = KeepAlive,
+       connect_timeout = ConnectTimeout,
+       connect_limit = ConnectLimit,
+       connect_number = ConnectNumber
+      } = State,
+
+    case amqp_connection:start(ConnAttrs) of
+	{ok, Conn} ->
+	    ConnMonitor = monitor(process, Conn),
+	    State1 = State#state{
+		       state = start,
+		       conn = Conn,
+		       conn_monitor = ConnMonitor,
+		       connect_number = 0
+		      },
+	    self() ! start,
+	    {noreply, State1};
+
+	_Error when KeepAlive, ConnectLimit == infinity orelse ConnectNumber < ConnectLimit ->
+	    State1 = State#state{
+		       connect_number = ConnectNumber + 1
+		      },
+	    timer:send_after(ConnectTimeout, init),
+	    {noreply, State1};
+
+	Error ->
+	    {stop, {error, {connect_to_amqp_server, Error}}, State}
+    end;
+
+handle_info(start, #state{state = start} = State) ->
     #state{
        sup = SupPid,
        cb_module = CbModule,
@@ -141,22 +178,37 @@ handle_info(start, #state{waiters = Waiters} = State) ->
        conn = Conn,
        exchange_declare = ExchangeDeclare,
        routing_key = RoutingKey,
-       consumers_number = NumberOfConsumers
+       consumers_number = NumberOfConsumers,
+       waiters = Waiters
       } = State,
 
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
-    {ok, ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
-
-    %%link(WorkerSup),
-    %%link(ConsumerSup),
+    {ok, _ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
 
     lists:foreach(fun (From) -> gen_server:reply(From, ready) end, Waiters),
 
     {noreply, State#state{state = work, waiters = []}};
 
-handle_info({'DOWN', ConnMonitor, process, Conn, _Info},
-	    #state{conn_monitor = ConnMonitor, conn = Conn} = State) ->
-    {stop, {error, amqp_connection_process_shutdown}, State};
+handle_info({'DOWN', _ConnMonitor, process, _Conn, _Info}, State) ->
+    #state{
+       sup = SupPid,
+       keepalive = KeepAlive
+      } = State,
+    case KeepAlive of
+	true ->
+	    amqp_handler:stop_consumer_sup(SupPid),
+	    amqp_handler:stop_worker_sup(SupPid),
+	    State1 = State#state{
+		       state = init,
+		       conn = undefined,
+		       conn_monitor = undefined
+		      },
+	    self() ! init,
+	    {noreply, State1};
+
+	false ->
+	    {stop, {error, amqp_connection_process_shutdown}, State}
+    end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
