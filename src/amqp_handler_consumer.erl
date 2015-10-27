@@ -21,7 +21,7 @@
 
 -record(state, {
 	  chan :: pid(),
-	  chan_monitor :: reference(),
+	  %% chan_monitor :: reference(),
 	  exchange,
 	  routing_key,
 	  queue,
@@ -60,7 +60,9 @@ start_link(Conn, ExchangeDeclare, RoutingKey, WorkerSup) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Conn, ExchangeDeclare, RoutingKey, WorkerSup]) ->
+    process_flag(trap_exit, true),
     {ok, Chan} = amqp_connection:open_channel(Conn),
+    link(Chan),
 
     #'exchange.declare'{exchange = Exchange} = ExchangeDeclare,
     #'exchange.declare_ok'{} = amqp_channel:call(Chan, ExchangeDeclare),
@@ -69,10 +71,10 @@ init([Conn, ExchangeDeclare, RoutingKey, WorkerSup]) ->
     ok = create_bindings(Chan, Exchange, RoutingKey, Queue),
     #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:call(Chan, #'basic.consume'{queue = Queue}),
 
-    ChanMonitor = monitor(process, Chan),
+    %% ChanMonitor = monitor(process, Chan),
     State = #state{
 	       chan = Chan,
-	       chan_monitor = ChanMonitor,
+	       %% chan_monitor = ChanMonitor,
 	       exchange = ExchangeDeclare,
 	       routing_key = RoutingKey,
 	       queue = Queue,
@@ -124,9 +126,16 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({'DOWN', ChanMonitor, process, Chan, _Info},
-	    #state{chan_monitor = ChanMonitor, chan = Chan} = State) ->
+handle_info({'EXIT', From, _Reason}, #state{chan = Chan} = State) when From == Chan ->
     {stop, {error, amqp_channel_process_shutdown}, State};
+
+handle_info({'EXIT', _From, Reason}, State) ->
+    {stop, Reason, State};
+
+%% handle_info({'DOWN', ChanMonitor, process, Chan, _Info},
+%% 	    #state{chan_monitor = ChanMonitor, chan = Chan} = State) ->
+%%     {stop, {error, amqp_channel_process_shutdown}, State};
+
 
 handle_info(#'basic.consume_ok'{consumer_tag = Tag},
 	    #state{consumer_tag = Tag, state = bind} = State) ->
@@ -135,9 +144,11 @@ handle_info(#'basic.consume_ok'{consumer_tag = Tag},
 
 handle_info(#'basic.cancel_ok'{consumer_tag = Tag}, 
 	    #state{consumer_tag = Tag, state = stop} = State) ->
-    #state{chan = Chan,
-	   chan_monitor = ChanMonitor} = State,
-    demonitor(ChanMonitor),
+    %% #state{chan = Chan,
+    %% 	   chan_monitor = ChanMonitor} = State,
+    %% demonitor(ChanMonitor),
+    #state{chan = Chan} = State,
+    unlink(Chan),
     amqp_channel:close(Chan),
     {stop, normal, State};
 
@@ -165,7 +176,9 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{chan = Chan} = _State) ->
+    unlink(Chan),
+    amqp_channel:close(Chan),
     ok.
 
 %%--------------------------------------------------------------------
