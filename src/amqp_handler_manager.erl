@@ -197,7 +197,7 @@ handle_info(start, #state{state = start} = State) ->
 
     {ok, Chan} = amqp_connection:open_channel(Conn),
     #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Chan, QueueDeclare),
-    QueueDeclare1 = QueueDeclare#'queue.declare'{queue = Queue},
+    QueueDeclare1 = QueueDeclare#'queue.declare'{queue = Queue, passive = true},
 
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
     {ok, _ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, QueueDeclare1, RoutingKey, NumberOfConsumers, WorkerSup),
