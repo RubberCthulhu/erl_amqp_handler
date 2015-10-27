@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4]).
+-export([start_link/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -41,8 +41,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Conn, ExchangeDeclare, RoutingKey, WorkerSup) ->
-    gen_server:start_link(?MODULE, [Conn, ExchangeDeclare, RoutingKey, WorkerSup], []).
+start_link(Conn, ExchangeDeclare, QueueDeclare, RoutingKey, WorkerSup) ->
+    gen_server:start_link(?MODULE, [Conn, ExchangeDeclare, QueueDeclare, RoutingKey, WorkerSup], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -59,14 +59,14 @@ start_link(Conn, ExchangeDeclare, RoutingKey, WorkerSup) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Conn, ExchangeDeclare, RoutingKey, WorkerSup]) ->
+init([Conn, ExchangeDeclare, QueueDeclare, RoutingKey, WorkerSup]) ->
     process_flag(trap_exit, true),
     {ok, Chan} = amqp_connection:open_channel(Conn),
     link(Chan),
 
     #'exchange.declare'{exchange = Exchange} = ExchangeDeclare,
     #'exchange.declare_ok'{} = amqp_channel:call(Chan, ExchangeDeclare),
-    QueueDeclare = #'queue.declare'{exclusive = true, auto_delete = true},
+    %% QueueDeclare = #'queue.declare'{exclusive = true, auto_delete = true},
     #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Chan, QueueDeclare),
     ok = create_bindings(Chan, Exchange, RoutingKey, Queue),
     #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:call(Chan, #'basic.consume'{queue = Queue}),

@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/5]).
+-export([start_link/6]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -27,8 +27,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
-    supervisor:start_link(?MODULE, [Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]).
+start_link(Conn, ExchangeDeclare, QueueDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
+    supervisor:start_link(?MODULE, [Conn, ExchangeDeclare, QueueDeclare, RoutingKey, NumberOfConsumers, WorkerSup]).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -47,7 +47,7 @@ start_link(Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]) ->
+init([Conn, ExchangeDeclare, QueueDeclare, RoutingKey, NumberOfConsumers, WorkerSup]) ->
     RestartStrategy = one_for_one,
     MaxRestarts = 10,
     MaxSecondsBetweenRestarts = 3600,
@@ -59,7 +59,7 @@ init([Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]) ->
     Type = worker,
 
     Consumers = [{{amqp_handler_consumer, make_ref()},
-		  {amqp_handler_consumer, start_link, [Conn, ExchangeDeclare, RoutingKey, WorkerSup]},
+		  {amqp_handler_consumer, start_link, [Conn, ExchangeDeclare, QueueDeclare, RoutingKey, WorkerSup]},
 		  Restart, Shutdown, Type, [amqp_handler_consumer]}
 		 || _ <- lists:seq(1, NumberOfConsumers)],
 

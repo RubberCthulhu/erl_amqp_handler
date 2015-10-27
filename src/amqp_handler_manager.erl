@@ -17,6 +17,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-include_lib("amqp_client/include/amqp_client.hrl").
+
 -define(SERVER, ?MODULE).
 
 -record(state, {
@@ -25,6 +27,7 @@
 	  conn = undefined :: pid(),
 	  conn_monitor = undefined :: reference(),
 	  exchange_declare,
+	  queue_declare,
 	  routing_key :: binary(),
 	  consumers_number :: non_neg_integer(),
 	  cb_module,
@@ -73,10 +76,19 @@ wait_for_ready(Pid, Timeout) ->
 %% @end
 %%--------------------------------------------------------------------
 init([SupPid, ConnAttrs, ExchangeDeclare, RoutingKey, NumberOfConsumers, CbModule, CbArgs, Opts]) ->
+    QueueDeclare = case proplists:lookup(queue_declare, Opts) of
+		       {_, #'queue.declare'{} = Declare} ->
+			   Declare;
+		       none ->
+			   #'queue.declare'{
+			      auto_delete = true
+			     }
+		   end,
     State = #state{
 	       sup = SupPid,
 	       conn_attrs = ConnAttrs,
 	       exchange_declare = ExchangeDeclare,
+	       queue_declare = QueueDeclare,
 	       routing_key = RoutingKey,
 	       consumers_number = NumberOfConsumers,
 	       cb_module = CbModule,
@@ -177,17 +189,24 @@ handle_info(start, #state{state = start} = State) ->
        cb_args = CbArgs,
        conn = Conn,
        exchange_declare = ExchangeDeclare,
+       queue_declare = QueueDeclare,
        routing_key = RoutingKey,
        consumers_number = NumberOfConsumers,
        waiters = Waiters
       } = State,
 
+    {ok, Chan} = amqp_connection:open_channel(Conn),
+    #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Chan, QueueDeclare),
+    QueueDeclare1 = QueueDeclare#'queue.declare'{queue = Queue},
+
     {ok, WorkerSup} = amqp_handler:start_worker_sup(SupPid, CbModule, CbArgs),
-    {ok, _ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup),
+    {ok, _ConsumerSup} = amqp_handler:start_consumer_sup(SupPid, Conn, ExchangeDeclare, QueueDeclare1, RoutingKey, NumberOfConsumers, WorkerSup),
+
+    amqp_channel:close(Chan),
 
     lists:foreach(fun (From) -> gen_server:reply(From, ready) end, Waiters),
 
-    {noreply, State#state{state = work, waiters = []}};
+    {noreply, State#state{queue_declare = QueueDeclare1, state = work, waiters = []}};
 
 handle_info({'DOWN', _ConnMonitor, process, _Conn, _Info}, State) ->
     #state{
