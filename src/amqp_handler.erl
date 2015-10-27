@@ -6,7 +6,7 @@
 %% API
 -export([start/0, start/1, stop/0]).
 -export([start_handler/8, stop_handler/1]).
--export([start_link/0, start_worker_sup/3, start_consumer_sup/6,
+-export([start_link/0, start_worker_sup/3, start_consumer_sup/7,
 	 stop_worker_sup/1, stop_consumer_sup/1]).
 
 %% Callback
@@ -73,9 +73,9 @@ start_worker_sup(Pid, CbModule, CbArgs) ->
 	    supervisor:start_child(Pid, Spec)
     end.
 
-start_consumer_sup(Pid, Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
+start_consumer_sup(Pid, Conn, ExchangeDeclare, QueueDeclare, RoutingKey, NumberOfConsumers, WorkerSup) ->
     Spec = {amqp_handler_consumer_sup,
-	    {amqp_handler_consumer_sup, start_link, [Conn, ExchangeDeclare, RoutingKey, NumberOfConsumers, WorkerSup]},
+	    {amqp_handler_consumer_sup, start_link, [Conn, ExchangeDeclare, QueueDeclare, RoutingKey, NumberOfConsumers, WorkerSup]},
 	    permanent, 2000, supervisor, [amqp_handler_consumer_sup]},
     Children = [Id || {Id, _, _, _} <- supervisor:which_children(Pid)],
     case lists:member(amqp_handler_consumer_sup, Children) of
