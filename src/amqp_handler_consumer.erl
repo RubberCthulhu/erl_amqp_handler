@@ -66,7 +66,7 @@ init([Conn, ExchangeDeclare, RoutingKey, WorkerSup]) ->
 
     #'exchange.declare'{exchange = Exchange} = ExchangeDeclare,
     #'exchange.declare_ok'{} = amqp_channel:call(Chan, ExchangeDeclare),
-    QueueDeclare = #'queue.declare'{exclusive = true},
+    QueueDeclare = #'queue.declare'{exclusive = true, auto_delete = true},
     #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Chan, QueueDeclare),
     ok = create_bindings(Chan, Exchange, RoutingKey, Queue),
     #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:call(Chan, #'basic.consume'{queue = Queue}),
